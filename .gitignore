@@ -1,0 +1,8 @@
+resource/vncorenlp
+resource/tokenizer
+resource/intent_classifier
+resource/named_entity_recognizer
+archived_models
+.vscode
+venv
+__pycache__
