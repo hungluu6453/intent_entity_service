@@ -22,7 +22,6 @@ class Data_Processor:
         if not os.path.exists(vncorenlp_dir):
             os.makedirs(vncorenlp_dir)
             py_vncorenlp.download_model(save_dir=VNCORENLP_PATH)
-        # self.annotator = py_vncorenlp.VnCoreNLP(annotators=["wseg"], save_dir=vncorenlp_dir)
         vncorenlp_dir = 'resource/vncorenlp/VnCoreNLP-1.2.jar'
         self.annotator = VnCoreNLP(vncorenlp_dir, annotators='wseg')
     
@@ -30,7 +29,6 @@ class Data_Processor:
         def annotate(annotator):
             def apply(x):
                 return ' '.join([' '.join(text) for text in annotator.tokenize(x)])
-                # return ' '.join(annotator.word_segment(x))
             return apply
         return list(map(annotate(self.annotator), text))
     
@@ -67,9 +65,12 @@ class Intent_Classifier:
             intent = None
         else:
             intent = self.intent_list[index]
+        
+        confidence = round(output[index].numpy(), 4)
+
         return {
             'intent': intent,
-            'confidence': output[index]
+            'confidence': confidence
         }
 
 
@@ -87,19 +88,16 @@ class Entity_Recognizer:
 
     def predict(self, tokenized_input):
         decoded_sequence, potentials, _, _ = self.model(tokenized_input[:, 1:])
-        decoded_sequence = decoded_sequence[0].numpy()
-        potentials = potentials[0].numpy()
+        decoded_sequence = tf.squeeze(decoded_sequence).numpy()
         index = np.where((decoded_sequence!=0)&(decoded_sequence!=1))
-        max_confidence_index = np.unravel_index(np.argmax(potentials, axis=1), potentials.shape)
-        max_confidence_index = np.ravel_multi_index(max_confidence_index, potentials.shape)
-        confidence_list = potentials[max_confidence_index][index]
-        if len(confidence_list) == 0:
-            confidence_list = [1.]
-        entity_list = [self.id2tag[i] for i in decoded_sequence[index]]
+
+        confidence_list = tf.nn.softmax(tf.squeeze(potentials), axis=-1).numpy()[index].max(axis=-1).tolist()
+        bio_entity = [self.id2tag[i] for i in decoded_sequence[index]]
         value = tokenized_input[0, 1:][index]
+
         return {
-            'entity': entity_list,
-            # 'confidence': confidence_list,
+            'bio_entity': bio_entity,
+            'confidence': confidence_list,
             'value': value
         }
 
@@ -109,13 +107,21 @@ class Entity_Recognizer:
     def create_entity_id_dict(self, bio_entity_list):
         return {e: bio_entity_list.index(e)+1 for e in bio_entity_list}, {bio_entity_list.index(e)+1: e for e in bio_entity_list}
     
-    def create_entity_dict(self, entity_list, decoded_value):
-        role = ''
-        if 'B-ROLE' in entity_list:
-            B_role_index = entity_list.index('B-ROLE')
-            role = decoded_value[B_role_index]
+    def create_entity_dict(self, bio_entity, decoded_value, entity_confidence):
+        zipped_list = zip(bio_entity, decoded_value, entity_confidence)
+        entity_dict = {e: [] for e in self.entity_list}
+        for bio_e, v, c in zipped_list:
+            bio_tag = bio_e.split('-')
+            if bio_tag[0] == 'B':
+                entity_dict[bio_tag[1].lower()].append([v, [round(c, 4)]])
+            else:
+                entity_dict[bio_tag[1].lower()][-1][0] += (' ' + v)
+                entity_dict[bio_tag[1].lower()][-1][1].append(round(c, 4))
 
-        return {
-            'policy': '',
-            'role': role,
-        }
+        for key in entity_dict.keys():
+            if len(entity_dict[key]) != 0:
+                for i, _ in enumerate(entity_dict[key]):
+                    confidence_list = entity_dict[key][i][-1]
+                    entity_dict[key][i][-1] = sum(confidence_list) / len(confidence_list)
+
+        return entity_dict

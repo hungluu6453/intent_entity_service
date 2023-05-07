@@ -1,7 +1,4 @@
-resource/vncorenlp
-resource/tokenizer
-resource/intent_classifier
-resource/named_entity_recognizer
+resource
 archived_models
 .vscode
 venv
