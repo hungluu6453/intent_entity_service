@@ -18,13 +18,15 @@ class Data_Processor:
         tokenizer_dir = os.path.join(CURRENT_DIR, TOKENIZER_PATH)
         self.tokenizer = PhobertTokenizer.from_pretrained("vinai/phobert-base", cache_dir=tokenizer_dir)
 
-    def load_annotator(self):       
-        vncorenlp_dir = os.path.join(CURRENT_DIR, VNCORENLP_PATH) 
+    def load_annotator(self):
+        os.chdir("..")
+        CURRENT_DIR = os.getcwd()
+        vncorenlp_dir = os.path.join(CURRENT_DIR, VNCORENLP_PATH)
         if not os.path.exists(vncorenlp_dir):
             os.makedirs(vncorenlp_dir)
             py_vncorenlp.download_model(save_dir=VNCORENLP_PATH)
-        vncorenlp_dir = 'resource/vncorenlp/VnCoreNLP-1.2.jar'
-        self.annotator = VnCoreNLP(vncorenlp_dir, annotators='wseg')
+        self.annotator = VnCoreNLP(VNCORENLP_MODEL_PATH, annotators='wseg')
+        os.chdir("3_intent_entity_service")
     
     def batch_annonate(self, text):
         def annotate(annotator):
@@ -57,8 +59,11 @@ class Intent_Classifier:
             self.load_lm()
 
     def load_model(self):
+        os.chdir("..")
+        CURRENT_DIR = os.getcwd()
         model_dir = os.path.join(CURRENT_DIR, INTENT_MODEL_PATH)
         self.model = keras.models.load_model(model_dir)
+        os.chdir("3_intent_entity_service")
 
     def load_lm(self):
         self.lm = TFAutoModel.from_pretrained("vinai/phobert-base").roberta
@@ -98,8 +103,11 @@ class Entity_Recognizer:
         self.load_model()
 
     def load_model(self):
+        os.chdir("..")
+        CURRENT_DIR = os.getcwd()
         model_dir = os.path.join(CURRENT_DIR, ENTITY_MODEL_PATH)
         self.model = keras.models.load_model(model_dir)
+        os.chdir("3_intent_entity_service")
 
     def predict(self, tokenized_input):
         if not self.useLM:
