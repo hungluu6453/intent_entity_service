@@ -6,7 +6,8 @@ import keras
 import tensorflow_addons as tfa
 from vncorenlp import VnCoreNLP
 
-from transformers import PhobertTokenizer
+from transformers import PhobertTokenizer, TFAutoModel
+from tensorflow.keras.layers import GlobalAveragePooling1D
 from constant import *
 
 CURRENT_DIR = os.getcwd()
@@ -33,8 +34,7 @@ class Data_Processor:
         return list(map(annotate(self.annotator), text))
     
     def batch_tokenize(self, batch_input):
-        tokenized_text = self.tokenizer(batch_input, padding ='max_length',return_tensors = 'np', truncation=True)['input_ids']
-        tokenized_text[tokenized_text<3] = 0
+        tokenized_text = self.tokenizer(batch_input, padding ='max_length',return_tensors = 'np', truncation=True)
         return tokenized_text
     
     def batch_clean(self, batch_input):
@@ -49,23 +49,38 @@ class Data_Processor:
         return batch_input
 
 class Intent_Classifier:
-    def __init__(self, intent_list):
+    def __init__(self, intent_list, useLM=True):
         self.intent_list = intent_list
         self.load_model()
+        self.useLM = useLM
+        if useLM:
+            self.load_lm()
 
     def load_model(self):
         model_dir = os.path.join(CURRENT_DIR, INTENT_MODEL_PATH)
         self.model = keras.models.load_model(model_dir)
 
+    def load_lm(self):
+        self.lm = TFAutoModel.from_pretrained("vinai/phobert-base").roberta
+        self.pooling = GlobalAveragePooling1D()
+
     def predict(self, tokenized_input):
-        output = self.model(tokenized_input)[0]
+        if self.useLM:
+            embed_data = self.lm(tokenized_input)[0]
+            pooling_data = self.pooling(embed_data)
+            output = self.model(pooling_data)[0]
+        else:
+            tokenized_input = tokenized_input['input_ids']
+            tokenized_input[tokenized_input<3] = 0
+            output = self.model(tokenized_input)[0]
+
         index = np.argmax(output)
 
         if output[index] < INTENT_THRESHOLD:
             intent = None
         else:
             intent = self.intent_list[index]
-        
+    
         confidence = round(output[index].numpy(), 4)
 
         return {
@@ -75,11 +90,11 @@ class Intent_Classifier:
 
 
 class Entity_Recognizer:
-    def __init__(self, entity_list):
+    def __init__(self, entity_list, useLM=False):
         self.entity_list = entity_list
         self.bio_entity_list = self.create_BIO_tagging(self.entity_list)
         self.tag2id, self.id2tag = self.create_entity_id_dict(self.bio_entity_list)
-
+        self.useLM = useLM
         self.load_model()
 
     def load_model(self):
@@ -87,6 +102,9 @@ class Entity_Recognizer:
         self.model = keras.models.load_model(model_dir)
 
     def predict(self, tokenized_input):
+        if not self.useLM:
+            tokenized_input = tokenized_input['input_ids']
+            tokenized_input[tokenized_input<3] = 0
         decoded_sequence, potentials, _, _ = self.model(tokenized_input[:, 1:])
         decoded_sequence = tf.squeeze(decoded_sequence).numpy()
         index = np.where((decoded_sequence!=0)&(decoded_sequence!=1))
